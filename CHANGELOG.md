@@ -4,6 +4,26 @@
 
 ---
 
+## [v2.17.1] - 2026-03-25
+
+### ✨ 新功能
+
+#### 🪟 统一弹窗系统
+- **新增**: `ui-dialogs.js` — 全局弹窗组件库，CSS 内联无外部依赖
+- **`showToast(msg, type)`**: 右上角 Toast 通知，替代所有 `alert()`（×31处）
+  - 类型自动分类：✅ success / ❌ error / ⚠️ warning / ℹ️ info
+  - 非阻塞，自动消失（3.5s），点击即关闭，支持多条叠加
+- **`showConfirm(msg, opts)`**: 自定义确认弹窗，替代所有 `confirm()`（×13处）
+  - 返回 `Promise<boolean>`，支持 `async/await`
+  - 毛玻璃背景，ESC 取消，Enter 确认
+  - `danger: true` 时确认按钮显示红色
+
+### 🔧 代码优化
+- 函数改为 `async`：`toggleClusterMode`、`clearAllLayersWithConfirm`、`clearAllLayers`、`deleteEvent`、`deleteArchive`、`deleteCodeArchive`、图层列表点击委托
+- `timeline-manager.js`（同步自主版）：`onSnapshotClick`、`applyBrowsingSnapshot` 改为 `async`
+
+---
+
 ## [v2.17.0] - 2026-03-25
 
 ### 🧹 项目整理
