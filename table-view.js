@@ -126,21 +126,66 @@ function getTableColumns() {
             width: 90,
             visible: false,  // 默认隐藏
         },
-        // 定位按钮列
+        // 操作按钮列（定位 + 删除）
         {
             title: "操作",
             field: "_actions",
-            width: 80,
+            width: 120,
             frozen: true,
             hozAlign: "center",
             headerSort: false,
             formatter: function (cell, formatterParams, onRendered) {
-                return '<button class="table-locate-btn" title="定位到地图"><i class="fa-solid fa-location-crosshairs"></i></button>';
+                return `
+                    <button class="table-locate-btn" title="定位到地图">
+                        <i class="fa-solid fa-location-crosshairs"></i>
+                    </button>
+                    <button class="table-delete-btn" title="删除此标记">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                `;
             },
-            cellClick: function (e, cell) {
+            cellClick: async function (e, cell) {
                 e.stopPropagation();  // 阻止冒泡到行点击
                 const rowData = cell.getRow().getData();
-                locateMarkerOnMap(rowData._layer);
+                const target = e.target.closest('button');
+
+                if (!target) return;
+
+                if (target.classList.contains('table-locate-btn')) {
+                    // 定位按钮
+                    locateMarkerOnMap(rowData._layer);
+                } else if (target.classList.contains('table-delete-btn')) {
+                    // 删除按钮 - 复用统一的删除逻辑
+                    const layer = rowData._layer;
+                    if (!layer) return;
+
+                    const props = layer.feature?.properties || {};
+                    const name = props.名称 || props.name || '此标记';
+
+                    if (await showConfirm(`确定要删除 "${name}" 吗？`)) {
+                        // 调用统一删除接口 (script.js 中已定义)
+                        if (typeof deleteLayer === 'function') {
+                            deleteLayer(L.stamp(layer));
+                        } else if (typeof window.deleteLayer === 'function') {
+                            window.deleteLayer(L.stamp(layer));
+                        } else {
+                            // 备用方案：直接移除
+                            if (typeof drawnItems !== 'undefined' && drawnItems.hasLayer(layer)) {
+                                drawnItems.removeLayer(layer);
+                            }
+                            if (typeof map !== 'undefined' && map.hasLayer(layer)) {
+                                map.removeLayer(layer);
+                            }
+                            if (typeof updateLayerList === 'function') updateLayerList();
+                            if (typeof updateLayerStats === 'function') updateLayerStats();
+                        }
+                        // 刷新表格
+                        updateFeatureTable();
+                        if (typeof showBriefMessage === 'function') {
+                            showBriefMessage(`🗑️ 已删除: ${name}`);
+                        }
+                    }
+                }
             }
         },
     ];
