@@ -324,13 +324,13 @@ const hiddenLayers = new Set();
 window.hiddenLayers = hiddenLayers;
 
 // ==== 聚合模式切换函数 ==== //
-function toggleClusterMode(enabled) {
+async function toggleClusterMode(enabled) {
     const checkEl = document.getElementById('enableClusterCheck');
 
     // 检查与标记组的互斥冲突
     if (enabled && activeGroupingMode === 'marker-group') {
         const confirmMsg = '启用点聚合后，将关闭并禁用当前的『标记组（相近标记自动成组）』功能，二者无法同时使用。\n\n是否继续？';
-        if (!confirm(confirmMsg)) {
+        if (!await showConfirm(confirmMsg)) {
             // 用户取消，无额外操作（因为按钮点击逻辑由调用者控制，或者我们需要手动重置 UI？）
             // 实际上由于是 toggleClusterMode(!current) 调用，如果取消，状态应保持原样
             return;
@@ -453,14 +453,14 @@ function toggleMarkerGroupUI(enabled) {
 window.toggleClusterMode = toggleClusterMode;
 
 // ==== 清空所有图层函数 ==== //
-function clearAllLayersWithConfirm() {
+async function clearAllLayersWithConfirm() {
     const layerCount = drawnItems.getLayers().length + markerClusterGroup.getLayers().length;
     if (layerCount === 0) {
         showBriefMessage('ℹ️ 当前没有图层可清空');
         return;
     }
 
-    if (confirm(`确定要清空所有 ${layerCount} 个图层吗？此操作不可撤销。`)) {
+    if (await showConfirm(`确定要清空所有 ${layerCount} 个图层吗？此操作不可撤销。`)) {
         clearAllLayers();
     }
 }
@@ -931,7 +931,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const layerListEl = document.getElementById('layerList');
     if (layerListEl) {
         // 点击事件：处理按钮
-        layerListEl.addEventListener('click', (e) => {
+        layerListEl.addEventListener('click', async (e) => {
             const btn = e.target.closest('[data-action]');
             if (!btn) return;
 
@@ -953,7 +953,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     toggleLayerVisibility(id);
                     break;
                 case 'delete':
-                    if (confirm('确定删除此图层？此操作不可恢复。')) {
+                    if (await showConfirm('确定删除此图层？此操作不可恢复。')) {
                         deleteLayer(id);
                     }
                     break;
@@ -1403,7 +1403,7 @@ function importGeoJSON(raw) {
         updateLayerList();
         if (drawnItems.getLayers().length) map.fitBounds(drawnItems.getBounds());
     } catch (e) {
-        alert('GeoJSON 解析错误：' + e.message);
+        showToast('GeoJSON 解析错误：' + e.message);
     }
 }
 
@@ -1834,7 +1834,7 @@ geojsonFileInput.addEventListener('change', e => {
             // Show import modal
             document.getElementById('importModal').style.display = 'flex';
         } catch (e) {
-            alert('GeoJSON 解析错误：' + e.message);
+            showToast('GeoJSON 解析错误：' + e.message);
         }
     };
     reader.readAsText(file);
@@ -1853,7 +1853,7 @@ function confirmImport() {
     // 1. 读取待导入数据
     if (!pendingImportData) {
         console.warn('No pending import data');
-        alert('没有待导入的数据，请先选择文件');
+        showToast('没有待导入的数据，请先选择文件');
         return;
     }
 
@@ -1886,7 +1886,7 @@ function confirmImport() {
         console.log('Import completed successfully');
     } catch (err) {
         console.error('Import failed:', err);
-        alert('导入失败：' + err.message);
+        showToast('导入失败：' + err.message);
     }
 }
 
@@ -2223,11 +2223,11 @@ if (clearAllBtn) {
         }
 
         if (!hasData) {
-            alert('当前没有可清空的数据');
+            showToast('当前没有可清空的数据');
             return;
         }
 
-        if (confirm('⚠️ 确定要清空所有图层吗？\n\n此操作将删除所有标记，无法撤销！')) {
+        if (await showConfirm('⚠️ 确定要清空所有图层吗？\n\n此操作将删除所有标记，无法撤销！')) {
             // 清空 MarkerGroupManager
             if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
                 markerGroupManager.clear();
@@ -2447,7 +2447,7 @@ if (exportBtn) {
         console.log('[Export CSV] Markers found:', markers.length);
 
         if (markers.length === 0) {
-            alert('没有标记可导出');
+            showToast('没有标记可导出');
             return;
         }
 
@@ -2561,7 +2561,7 @@ if (downloadTemplateBtn) {
             console.log('[Template] File download triggered');
         } catch (err) {
             console.error('[Template] Error:', err);
-            alert('模板下载失败: ' + err.message);
+            showToast('模板下载失败: ' + err.message);
         }
     });
 }
@@ -2575,7 +2575,7 @@ if (exportExcelBtn) {
             const markers = getAllMarkers();
 
             if (markers.length === 0) {
-                alert('没有标记可导出');
+                showToast('没有标记可导出');
                 return;
             }
 
@@ -2622,7 +2622,7 @@ if (exportExcelBtn) {
             console.log(`[Export Excel] 成功导出 ${data.length} 个标记，${allHeaders.length} 列`);
         } catch (err) {
             console.error('[Export Excel] Error:', err);
-            alert('Excel 导出失败: ' + err.message);
+            showToast('Excel 导出失败: ' + err.message);
         }
     });
 }
@@ -2642,7 +2642,7 @@ if (excelFileInput) {
                 const rows = XLSX.utils.sheet_to_json(firstSheet);
 
                 if (rows.length === 0) {
-                    alert('Excel 文件为空或格式不正确');
+                    showToast('Excel 文件为空或格式不正确');
                     return;
                 }
 
@@ -2720,13 +2720,13 @@ if (excelFileInput) {
                     if (errorCount > 0) {
                         msg += `\n（跳过 ${errorCount} 行无效数据）`;
                     }
-                    alert(msg);
+                    showToast(msg);
                 } else {
-                    alert('未找到有效的坐标数据。\n请确保 Excel 包含"经度"和"纬度"列（或 Longitude/Latitude）');
+                    showToast('未找到有效的坐标数据。\n请确保 Excel 包含"经度"和"纬度"列（或 Longitude/Latitude）');
                 }
             } catch (err) {
                 console.error('Excel 解析错误:', err);
-                alert('Excel 文件解析失败：' + err.message);
+                showToast('Excel 文件解析失败：' + err.message);
             }
         };
         reader.readAsArrayBuffer(file);
@@ -2748,7 +2748,7 @@ if (coordFileInput) {
                 const rows = results.data;
 
                 if (rows.length === 0) {
-                    alert('CSV 文件为空');
+                    showToast('CSV 文件为空');
                     return;
                 }
 
@@ -2810,14 +2810,14 @@ if (coordFileInput) {
                     if (errorCount > 0) {
                         msg += `\n（跳过 ${errorCount} 行无效数据）`;
                     }
-                    alert(msg);
+                    showToast(msg);
                 } else {
-                    alert('未找到有效的坐标数据。\n请确保 CSV 包含"经度"和"纬度"列（或 lat/lng）');
+                    showToast('未找到有效的坐标数据。\n请确保 CSV 包含"经度"和"纬度"列（或 lat/lng）');
                 }
             },
             error: function (err) {
                 console.error('CSV 解析错误:', err);
-                alert('CSV 解析失败: ' + err.message);
+                showToast('CSV 解析失败: ' + err.message);
             }
         });
         // Reset input to allow re-selecting the same file
@@ -2950,7 +2950,7 @@ window.clearLayerSearch = clearLayerSearch;
 
 searchBtn.addEventListener('click', async () => {
     const addr = searchAddressInput.value.trim();
-    if (!addr) { alert('请输入地址'); return; }
+    if (!addr) { showToast('请输入地址'); return; }
     try {
         const resp = await fetch(`${AMAP_GEOCODE_URL}?key=${AMAP_API_KEY}&address=${encodeURIComponent(addr)}`);
         const data = await resp.json();
@@ -2965,18 +2965,18 @@ searchBtn.addEventListener('click', async () => {
             drawnItems.addLayer(marker);
             updateLayerList();
         } else {
-            alert('未找到该地址');
+            showToast('未找到该地址');
         }
     } catch (e) {
         console.error(e);
-        alert('搜索失败');
+        showToast('搜索失败');
     }
 });
 
 gotoCoordBtn.addEventListener('click', () => {
     const lat = parseFloat(gotoLatInput.value);
     const lng = parseFloat(gotoLngInput.value);
-    if (isNaN(lat) || isNaN(lng)) { alert('请输入有效坐标'); return; }
+    if (isNaN(lat) || isNaN(lng)) { showToast('请输入有效坐标'); return; }
     map.setView([lat, lng], 15);
     const icon = createCustomMarkerIcon('#4a90e2', 'default');
     const marker = L.marker([lat, lng], { icon });
@@ -3220,19 +3220,19 @@ window.closeEventTracker = function () {
     }
     eventTrackerPanel.style.display = 'none';
     currentTrackedFeature = null;
-    alert('面板已关闭');
+    showToast('面板已关闭');
 };
 
 window.saveEventData = function () {
     console.log('saveEventData called');
     if (!currentTrackedFeature) {
-        alert('没有选中的图层');
+        showToast('没有选中的图层');
         return;
     }
     const eventData = currentTrackedFeature._currentEventData || initEventData();
     eventData.notes = eventNotes.value;
     setEventData(currentTrackedFeature._eventId, eventData);
-    alert('✅ 事件数据已保存！');
+    showToast('✅ 事件数据已保存！');
 };
 
 
@@ -3375,7 +3375,7 @@ function editEvent(eventId) {
     const event = events.find(e => e.id === eventId);
 
     if (!event) {
-        alert('事件未找到');
+        showToast('事件未找到');
         return;
     }
 
@@ -3397,10 +3397,10 @@ function editEvent(eventId) {
 
 
 // Delete an event
-function deleteEvent(eventId) {
+async function deleteEvent(eventId) {
     if (!currentTrackedFeature) return;
 
-    if (!confirm('确定删除此事件？')) return;
+    if (!await showConfirm('确定删除此事件？')) return;
 
     const events = getMarkerEvents(currentTrackedFeature);
     const index = events.findIndex(e => e.id === eventId);
@@ -3756,8 +3756,8 @@ function loadArchive(id) {
 }
 
 // Delete archive
-function deleteArchive(id) {
-    if (!confirm('确定删除此存档？')) return;
+async function deleteArchive(id) {
+    if (!await showConfirm('确定删除此存档？')) return;
 
     localStorage.removeItem(id);
 
@@ -4012,8 +4012,8 @@ function loadCodeArchive(id) {
     console.log('加载代码存档:', arc?.name);
 }
 
-function deleteCodeArchive(id) {
-    if (!confirm('确定删除此代码存档？')) return;
+async function deleteCodeArchive(id) {
+    if (!await showConfirm('确定删除此代码存档？')) return;
 
     localStorage.removeItem(id);
 
@@ -4323,7 +4323,7 @@ if (addTimelineBtn) {
 if (saveEventDataBtn) {
     saveEventDataBtn.addEventListener('click', () => {
         if (!currentTrackedFeature) {
-            alert('没有选中的图层');
+            showToast('没有选中的图层');
             return;
         }
 
@@ -4331,7 +4331,7 @@ if (saveEventDataBtn) {
         eventData.notes = eventNotes.value;
         setEventData(currentTrackedFeature._eventId, eventData);
 
-        alert('✅ 事件数据已保存到本地存储！\n\n数据与图层分开存储，刷新页面后重新打开事件追踪器即可查看。');
+        showToast('✅ 事件数据已保存到本地存储！\n\n数据与图层分开存储，刷新页面后重新打开事件追踪器即可查看。');
     });
 } else {
     console.error('saveEventDataBtn not found!');
@@ -4759,7 +4759,7 @@ setTimeout(() => {
 }, 800);
 
 // ==== Clear All Layers ==== //
-function clearAllLayers() {
+async function clearAllLayers() {
     // 检查是否在浏览模式
     if (typeof timelineManager !== 'undefined' && timelineManager && timelineManager.isBrowseMode) {
         if (typeof showBriefMessage === 'function') {
@@ -4768,7 +4768,7 @@ function clearAllLayers() {
         return;
     }
 
-    if (!confirm('确定要清空所有图层吗？此操作不可撤销。')) {
+    if (!await showConfirm('确定要清空所有图层吗？此操作不可撤销。')) {
         return;
     }
 
@@ -4892,7 +4892,7 @@ async function exportAsSinglePage() {
     // 收集当前所有标记
     const markers = typeof getAllMarkers === 'function' ? getAllMarkers() : [];
     if (markers.length === 0) {
-        const proceed = confirm('当前地图没有任何标记数据。\n是否仍然导出空白单网页版？');
+        const proceed = await showConfirm('当前地图没有任何标记数据。\n是否仍然导出空白单网页版？');
         if (!proceed) return;
     }
 
@@ -4923,7 +4923,7 @@ async function exportAsSinglePage() {
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             templateHtml = await resp.text();
         } catch (fetchErr) {
-            alert(
+            showToast(
                 '❌ 找不到空白模板文件。\n\n' +
                 '请先在项目目录运行：\n' +
                 '  python build-single.py\n\n' +
@@ -4972,7 +4972,7 @@ async function exportAsSinglePage() {
 
     } catch (err) {
         console.error('[SinglePage] 导出失败:', err);
-        alert('导出失败: ' + err.message);
+        showToast('导出失败: ' + err.message);
     } finally {
         if (btn) {
             btn.disabled = false;
