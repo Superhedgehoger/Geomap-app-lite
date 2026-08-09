@@ -1,5 +1,9 @@
 // script.js - GeoJSON Map Editor with FontAwesome marker icons
 
+/*
+ * Geomap App Main Script
+ */
+
 // ==== Configuration ==== //
 const AMAP_API_KEY = 'f9ef1f8a897389df48a43e18ac4660d8';
 const AMAP_GEOCODE_URL = 'https://restapi.amap.com/v3/geocode/geo';
@@ -12,15 +16,16 @@ const TENCENT_MAP_KEY = '';
 // 天地图 Token（需在 https://console.tianditu.gov.cn/ 注册）
 const TIANDITU_TOKEN = '';
 
+function isEventTrackerEnabled() {
+    return !window.GEOMAP_FEATURES || window.GEOMAP_FEATURES.eventTracker !== false;
+}
+
 // ==== Initialize Map ==== //
 const map = L.map('map', {
-    zoomControl: false  // 禁用默认位置的缩放控件
+    zoomControl: false  // 禁用默认缩放控件（缩放按钮在左侧面板中）
 }).setView([36.0671, 120.3826], 12); // 青岛市中心
 
-// 添加缩放控件到左下角
-L.control.zoom({
-    position: 'bottomleft'
-}).addTo(map);
+// 注意：缩放控件已移至左侧面板，不再添加到地图上
 
 // ==== Base Layers Configuration ==== //
 // 底图配置（支持 OSM、卫星图、CartoDB、高德、腾讯、天地图等）
@@ -103,6 +108,38 @@ function switchBaseLayer(layerKey) {
     console.log('已切换底图:', layerKey);
 }
 window.switchBaseLayer = switchBaseLayer;
+
+
+// ==== Critical UI Functions (Defined early to prevent runtime errors) ==== //
+// Fixes map control panel buttons responsiveness
+
+function toggleLayerPanel() {
+    const layerPanel = document.getElementById('layerPanel');
+    if (!layerPanel) return;
+
+    layerPanel.classList.toggle('open');
+    console.log('[UI] Layer Panel toggled:', layerPanel.classList.contains('open') ? 'OPEN' : 'CLOSED');
+
+    // 如果图层面板打开，可能需要调整地图控件位置或做其他 UI 响应
+    if (layerPanel.classList.contains('open')) {
+        // 重置选中状态（如果有必要）
+    }
+}
+
+function toggleControlsPanel() {
+    const controls = document.getElementById('controls');
+    if (controls) {
+        controls.classList.toggle('collapsed');
+        updateUICollapsedState();
+        console.log('[UI] Controls collapsed state:', controls.classList.contains('collapsed'));
+    } else {
+        console.error('[UI] #controls element not found!');
+    }
+}
+
+// Ensure global access
+window.toggleLayerPanel = toggleLayerPanel;
+window.toggleControlsPanel = toggleControlsPanel;
 
 
 // ==== FontAwesome Icon Marker System ==== //
@@ -270,6 +307,250 @@ function getMarkerIcon(properties) {
 const drawnItems = new L.FeatureGroup();
 map.addLayer(drawnItems);
 
+// ==== Draw Toolbar Toggle (默认隐藏) ==== //
+let isDrawToolbarVisible = false;  // 绘图工具栏默认关闭
+
+/**
+ * 切换绘图工具栏显示/隐藏
+ */
+function toggleDrawToolbar() {
+    isDrawToolbarVisible = !isDrawToolbarVisible;
+
+    const drawToolbar = document.querySelector('.leaflet-draw');
+    const btn = document.getElementById('toggleDrawToolbarBtn');
+    const statusText = document.getElementById('drawToolbarStatusText');
+
+    if (drawToolbar) {
+        if (isDrawToolbarVisible) {
+            drawToolbar.style.display = 'block';
+            if (btn) {
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-primary');
+            }
+            if (statusText) statusText.textContent = '已开启';
+            showBriefMessage('✏️ 绘图工具已开启');
+        } else {
+            drawToolbar.style.display = 'none';
+            if (btn) {
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-secondary');
+            }
+            if (statusText) statusText.textContent = '关闭';
+            showBriefMessage('ℹ️ 绘图工具已关闭');
+        }
+    } else {
+        console.warn('[DrawToolbar] 未找到绘图工具栏元素');
+    }
+}
+window.toggleDrawToolbar = toggleDrawToolbar;
+
+// 初始化时隐藏绘图工具栏（稍后在 DOMContentLoaded 中执行）
+function initHideDrawToolbar() {
+    const drawToolbar = document.querySelector('.leaflet-draw');
+    if (drawToolbar) {
+        drawToolbar.style.display = 'none';
+        console.log('[DrawToolbar] 绘图工具栏已默认隐藏');
+    }
+}
+
+// 页面加载后延迟执行隐藏（确保 Leaflet.draw 已初始化）
+setTimeout(initHideDrawToolbar, 500);
+
+// ==== Compact Labels Mode (紧凑标签模式) ==== //
+let isCompactLabelsVisible = false;  // 紧凑标签模式默认关闭
+const COMPACT_LABELS_MAX_MARKERS = 50;  // 性能熔断阈值
+
+/**
+ * 生成紧凑标签的 HTML 内容
+ * @param {Object} props - 标记的 properties 对象
+ * @returns {string} HTML 字符串
+ */
+function generateCompactLabelContent(props) {
+    const name = props.name || props['名称'] || props.title || '未命名';
+    const type = props.type || props['类型'] || props.category || '';
+    const address = props.address || props['地址'] || props.location || '';
+
+    return `
+        <div class="label-content">
+            <div class="label-header">
+                <span class="label-name">${name}</span>
+                ${type ? `<span class="label-type">${type}</span>` : ''}
+            </div>
+            ${address ? `<div class="label-address" title="${address}">${address}</div>` : ''}
+        </div>
+    `;
+}
+
+/**
+ * 获取当前视野内的所有可见标记
+ * @returns {L.Marker[]} 标记数组
+ */
+function getVisibleMarkersInBounds() {
+    const bounds = map.getBounds();
+    const markers = [];
+
+    // 遍历 drawnItems
+    if (drawnItems) {
+        drawnItems.eachLayer(layer => {
+            if (layer instanceof L.Marker && bounds.contains(layer.getLatLng())) {
+                // 检查是否可见（非隐藏）
+                if (!hiddenLayers.has(layer._leaflet_id)) {
+                    markers.push(layer);
+                }
+            }
+        });
+    }
+
+    // 遍历 markerClusterGroup（如果聚合模式开启）
+    if (clusterEnabled && markerClusterGroup) {
+        markerClusterGroup.eachLayer(layer => {
+            if (layer instanceof L.Marker && bounds.contains(layer.getLatLng())) {
+                if (!hiddenLayers.has(layer._leaflet_id)) {
+                    markers.push(layer);
+                }
+            }
+        });
+    }
+
+    // 遍历 markerGroupManager（如果存在）
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager && markerGroupManager.getAllMarkers) {
+        try {
+            const groupMarkers = markerGroupManager.getAllMarkers();
+            groupMarkers.forEach(marker => {
+                if (bounds.contains(marker.getLatLng()) && !hiddenLayers.has(marker._leaflet_id)) {
+                    // 避免重复添加
+                    if (!markers.includes(marker)) {
+                        markers.push(marker);
+                    }
+                }
+            });
+        } catch (e) {
+            console.warn('[CompactLabels] markerGroupManager 遍历失败:', e);
+        }
+    }
+
+    return markers;
+}
+
+/**
+ * 显示紧凑标签
+ */
+function showCompactLabels() {
+    const markers = getVisibleMarkersInBounds();
+
+    // 性能熔断检查
+    if (markers.length > COMPACT_LABELS_MAX_MARKERS) {
+        showBriefMessage(`⚠️ 视野内标记过多 (${markers.length})，仅显示前 ${COMPACT_LABELS_MAX_MARKERS} 个标签`);
+    }
+
+    // 只处理前 N 个标记
+    const markersToShow = markers.slice(0, COMPACT_LABELS_MAX_MARKERS);
+
+    markersToShow.forEach(marker => {
+        const props = marker.feature?.properties || {};
+        const tooltipContent = generateCompactLabelContent(props);
+
+        // 如果已有 tooltip，先解绑
+        if (marker.getTooltip()) {
+            marker.unbindTooltip();
+        }
+
+        // 绑定新的紧凑 tooltip
+        marker.bindTooltip(tooltipContent, {
+            permanent: true,
+            direction: 'top',
+            className: 'compact-map-label',
+            offset: [0, -10],
+            interactive: false
+        }).openTooltip();
+
+        // 标记已添加紧凑标签
+        marker._hasCompactLabel = true;
+    });
+
+    console.log(`[CompactLabels] 已显示 ${markersToShow.length} 个标签`);
+}
+
+/**
+ * 隐藏所有紧凑标签
+ */
+function hideCompactLabels() {
+    let count = 0;
+
+    // 遍历所有可能的标记来源
+    const sources = [drawnItems];
+    if (clusterEnabled && markerClusterGroup) sources.push(markerClusterGroup);
+
+    sources.forEach(source => {
+        if (source) {
+            source.eachLayer(layer => {
+                if (layer instanceof L.Marker && layer._hasCompactLabel) {
+                    layer.closeTooltip();
+                    layer.unbindTooltip();
+                    layer._hasCompactLabel = false;
+                    count++;
+                }
+            });
+        }
+    });
+
+    // 处理 markerGroupManager
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager && markerGroupManager.getAllMarkers) {
+        try {
+            markerGroupManager.getAllMarkers().forEach(marker => {
+                if (marker._hasCompactLabel) {
+                    marker.closeTooltip();
+                    marker.unbindTooltip();
+                    marker._hasCompactLabel = false;
+                    count++;
+                }
+            });
+        } catch (e) {
+            console.warn('[CompactLabels] markerGroupManager 清理失败:', e);
+        }
+    }
+
+    console.log(`[CompactLabels] 已隐藏 ${count} 个标签`);
+}
+
+/**
+ * 切换紧凑标签模式
+ */
+function toggleCompactLabels() {
+    isCompactLabelsVisible = !isCompactLabelsVisible;
+
+    const btn = document.getElementById('toggleCompactLabelsBtn');
+    const statusText = document.getElementById('compactLabelsStatusText');
+
+    if (isCompactLabelsVisible) {
+        showCompactLabels();
+        if (btn) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add('btn-primary');
+        }
+        if (statusText) statusText.textContent = '已开启';
+        showBriefMessage('🏷️ 紧凑标签模式已开启');
+    } else {
+        hideCompactLabels();
+        if (btn) {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-secondary');
+        }
+        if (statusText) statusText.textContent = '关闭';
+        showBriefMessage('ℹ️ 紧凑标签模式已关闭');
+    }
+}
+window.toggleCompactLabels = toggleCompactLabels;
+
+// 地图视野变化时自动刷新标签（如果模式开启）
+map.on('moveend zoomend', function () {
+    if (isCompactLabelsVisible) {
+        hideCompactLabels();
+        showCompactLabels();
+    }
+});
+
+
 // ==== Marker Clustering Setup ==== //
 // 使用 Leaflet.markercluster 实现标记聚合
 // 当聚合数量 >= 500 时显示 "500+"
@@ -330,7 +611,7 @@ async function toggleClusterMode(enabled) {
     // 检查与标记组的互斥冲突
     if (enabled && activeGroupingMode === 'marker-group') {
         const confirmMsg = '启用点聚合后，将关闭并禁用当前的『标记组（相近标记自动成组）』功能，二者无法同时使用。\n\n是否继续？';
-        if (!await showConfirm(confirmMsg)) {
+        if (!(await showConfirm(confirmMsg, { danger: false, title: '变更分组模式', icon: '⚙️', confirmText: '继续' }))) {
             // 用户取消，无额外操作（因为按钮点击逻辑由调用者控制，或者我们需要手动重置 UI？）
             // 实际上由于是 toggleClusterMode(!current) 调用，如果取消，状态应保持原样
             return;
@@ -454,43 +735,130 @@ window.toggleClusterMode = toggleClusterMode;
 
 // ==== 清空所有图层函数 ==== //
 async function clearAllLayersWithConfirm() {
-    const layerCount = drawnItems.getLayers().length + markerClusterGroup.getLayers().length;
+    let layerCount = drawnItems.getLayers().length + markerClusterGroup.getLayers().length;
+
+    // Check MarkerGroupManager counts if available
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
+        const stats = markerGroupManager.getStats();
+        // If markers are grouped, they might not be in drawnItems, so add them
+        // Note: Stats might overlap if some are still in drawnItems, but for "Is Empty" check,
+        // as long as > 0 it's fine.
+        layerCount += (stats.totalMarkers || 0);
+    }
+
+    // Also check raw map layers just in case (optional, but safer to avoid 'No layers' when things are visible)
+    // But map.eachLayer includes tiles, so be careful.
+    // Stick to the manager check first.
+
     if (layerCount === 0) {
         showBriefMessage('ℹ️ 当前没有图层可清空');
         return;
     }
 
-    if (await showConfirm(`确定要清空所有 ${layerCount} 个图层吗？此操作不可撤销。`)) {
+    // Improve the confirm message
+    const confirmMsg = (typeof markerGroupManager !== 'undefined' && markerGroupManager.getStats().totalMarkers > 0)
+        ? `确定要清空所有标记和图层吗？\n(包含 ${markerGroupManager.getStats().totalMarkers} 个聚合标记)`
+        : `确定要清空所有 ${layerCount} 个图层吗？此操作不可撤销。`;
+
+    if (await showConfirm(confirmMsg)) {
         clearAllLayers();
     }
 }
 window.clearAllLayersWithConfirm = clearAllLayersWithConfirm;
 
+// ==== Cleanup Helper: safely remove layers ==== //
+function safeClearLayerGroup(group) {
+    if (group && typeof group.clearLayers === 'function') {
+        try {
+            group.clearLayers();
+        } catch (e) {
+            console.warn('[Cleanup] Error clearing group:', e);
+        }
+    }
+}
+
 function clearAllLayers() {
-    // 清空聚合层
-    markerClusterGroup.clearLayers();
+    console.log('[ClearAll] Starting 3-step thorough cleanup...');
 
-    // 清空 drawnItems
-    drawnItems.clearLayers();
+    // --- 第一步：物理清除 (Visual Clear) ---
+    console.log('[ClearAll] Step 1: Visual Clear...');
 
-    // 清空 MarkerGroupManager
-    if (markerGroupManager) {
+    // 1.1 清空 MarkerGroupManager (已在 marker-group.js 中增强：会移除子标记)
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
         markerGroupManager.clear();
     }
 
-    // 清空隐藏图层
-    if (hiddenLayers) {
+    // 1.2 清空所有 Leaflet 容器
+    if (typeof drawnItems !== 'undefined') {
+        drawnItems.clearLayers();
+    }
+    if (typeof markerClusterGroup !== 'undefined') {
+        markerClusterGroup.clearLayers();
+    }
+    if (typeof geoJsonLayer !== 'undefined') {
+        geoJsonLayer.clearLayers();
+    }
+    if (typeof hiddenLayers !== 'undefined') {
+        // hiddenLayers 可能包含已从地图移除但仍在内存中的图层
+        hiddenLayers.forEach(layer => {
+            if (map.hasLayer(layer)) map.removeLayer(layer);
+        });
         hiddenLayers.clear();
     }
 
-    // 更新 UI
-    updateLayerList();
-    if (typeof updateFeatureTable === 'function') {
-        updateFeatureTable();
+    // 1.3 地毯式搜索地图上的残留用户标记（防止任何第三方或孤儿图层）
+    const layersToRemove = [];
+    map.eachLayer((layer) => {
+        if (layer instanceof L.TileLayer || layer instanceof L.Control) return;
+
+        // 识别用户内容：Marker, Path, 或者带有 feature 属性的对象
+        if (layer instanceof L.Marker || layer instanceof L.Path || layer.feature ||
+            (layer._icon && layer._icon.classList.contains('leaflet-marker-icon'))) {
+
+            // 排除容器本身
+            if (layer === drawnItems || layer === markerClusterGroup || layer === geoJsonLayer) return;
+
+            layersToRemove.push(layer);
+        }
+    });
+    layersToRemove.forEach(l => map.removeLayer(l));
+
+    // --- 第二步：数据清除 (Data Clear) ---
+    console.log('[ClearAll] Step 2: Data Clear...');
+
+    layerCounter = 0; // 重置图层计数器
+
+    if (typeof customGroupManager !== 'undefined' && customGroupManager) {
+        if (typeof customGroupManager.exitSelectionMode === 'function' && customGroupManager.selectionMode) {
+            customGroupManager.exitSelectionMode();
+        }
+        customGroupManager.clear();
     }
 
+    if (typeof selectionManager !== 'undefined' && selectionManager) {
+        if (typeof selectionManager.clear === 'function') selectionManager.clear();
+    }
+
+    // 重置 markerGroupManager 状态（如果需要）
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
+        markerGroupManager.enabled = true;
+    }
+
+    // --- 第三步：UI 同步 (UI Sync) ---
+    console.log('[ClearAll] Step 3: UI Sync...');
+
+    // 强制清空图层列表 HTML
+    if (typeof layerList !== 'undefined' && layerList) {
+        layerList.innerHTML = '<div class="empty-state">暂无图层</div>';
+    }
+
+    // 触发全局 UI 更新
+    updateLayerList();
+    if (typeof updateFeatureTable === 'function') updateFeatureTable();
+    if (typeof updateLayerStats === 'function') updateLayerStats();
+
     showBriefMessage('🗑️ 已清空所有图层');
-    console.log('All layers cleared');
+    console.log('[ClearAll] Cleanup summary: All visual layers removed, state reset, UI synced.');
 }
 window.clearAllLayers = clearAllLayers;
 
@@ -1169,37 +1537,66 @@ function toggleLayerVisibility(leafletId) {
 window.toggleLayerVisibility = toggleLayerVisibility;
 
 // Global Delete Function
+// Global Delete Function (Unified Single Source of Truth)
 function deleteLayer(leafletId) {
+    // 1. Find the layer instance
     const result = findLayerById(leafletId);
     if (!result) {
-        console.warn('Layer not found for deletion:', leafletId);
+        console.warn('[DeleteLayer] Layer not found:', leafletId);
         return;
     }
 
-    const { layer, container, type, group } = result;
+    const { layer, container, type } = result;
+    console.log('[DeleteLayer] Deleting layer:', leafletId, type);
 
-    // 清除范围圈
+    // 2. Clear Radius Rings first
     if (typeof clearRadiusRings === 'function') {
         clearRadiusRings(layer);
     }
 
-    // Remove from everywhere
-    if (map.hasLayer(layer)) map.removeLayer(layer);
-    if (hiddenLayers.has(layer)) hiddenLayers.delete(layer);
-
-    if (container === drawnItems) {
-        drawnItems.removeLayer(layer);
-    } else if (container === markerClusterGroup) {
-        if (markerClusterGroup.hasLayer(layer)) markerClusterGroup.removeLayer(layer);
-    } else if (type === 'markerGroup') {
-        if (group) {
-            const idx = group.markers.indexOf(layer);
-            if (idx > -1) group.markers.splice(idx, 1);
-            markerGroupManager.markerToGroup.delete(layer);
-            group.updateGroupMarker(map, drawnItems); // Refresh group
+    // 3. Remove from Selection Manager (Deselect if selected)
+    if (typeof selectionManager !== 'undefined' && selectionManager) {
+        if (selectionManager.isSelected(layer)) {
+            selectionManager.deselect();
         }
     }
 
+    // 4. Remove from Custom Group Manager
+    if (typeof customGroupManager !== 'undefined' && customGroupManager) {
+        // Remove from markerToGroups index
+        if (customGroupManager.markerToGroups.has(leafletId)) {
+            const groupIds = customGroupManager.markerToGroups.get(leafletId);
+            groupIds.forEach(gid => {
+                const group = customGroupManager.groups.get(gid);
+                if (group) {
+                    group.removeMember(leafletId);
+                    console.log(`[DeleteLayer] Removed from custom group: ${group.groupName}`);
+                }
+            });
+            customGroupManager.markerToGroups.delete(leafletId);
+        }
+    }
+
+    // 5. Remove from Marker Group Manager (Coordinate grouping)
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
+        // This handles removal from internal groups and data structures
+        markerGroupManager.removeMarker(layer);
+    }
+
+    // 6. Remove from Leaflet Containers (Map, drawnItems, Clusters)
+    // Attempt removal from all possible parents to be safe
+    if (map.hasLayer(layer)) map.removeLayer(layer);
+    if (hiddenLayers.has(layer)) hiddenLayers.delete(layer);
+
+    if (typeof drawnItems !== 'undefined' && drawnItems.hasLayer(layer)) {
+        drawnItems.removeLayer(layer);
+    }
+
+    if (typeof markerClusterGroup !== 'undefined' && markerClusterGroup.hasLayer(layer)) {
+        markerClusterGroup.removeLayer(layer);
+    }
+
+    // 7. Update UI and Stats
     updateLayerList();
 
     if (typeof updateFeatureTable === 'function') updateFeatureTable();
@@ -1420,14 +1817,23 @@ function updateLabels() {
 function bindMarkerPopup(layer) {
     if (!(layer instanceof L.Marker)) return;
 
+    // NOTE: 弹出内容由 popup-config.js 的 renderMarkerPopupHtml() 动态生成
+    // 用户可在"高级工具 -> 弹出信息配置"中自定义显示字段
+    const popupHtml = typeof renderMarkerPopupHtml === 'function'
+        ? renderMarkerPopupHtml(layer)
+        : _bindMarkerPopupFallback(layer);
+
+    layer.bindPopup(popupHtml, { maxWidth: 320 });
+}
+
+// 兜底：popup-config.js 未加载时的简单实现
+function _bindMarkerPopupFallback(layer) {
     const latlng = layer.getLatLng();
     const props = layer.feature?.properties || {};
-    const name = props.名称 || props.name || layer.options.name || '未命名标记';
-    const type = props.类型 || props.type || '';
-    const address = props.地址 || props.address || '';
+    const name = props['\u540d\u79f0'] || props.name || layer.options.name || '\u672a\u547d\u540d\u6807\u8bb0';
+    const type = props['\u7c7b\u578b'] || props.type || '';
+    const address = props['\u5730\u5740'] || props.address || '';
     const events = props.events || [];
-
-    // Build event list HTML (show up to 3 recent events)
     let eventListHtml = '';
     if (events.length > 0) {
         const recentEvents = events.slice(-3).reverse();
@@ -1442,19 +1848,16 @@ function bindMarkerPopup(layer) {
             ${events.length > 3 ? `<div class="popup-event-more">还有 ${events.length - 3} 个事件...</div>` : ''}
         </div>`;
     }
-
-    const popupHtml = `<div class="marker-popup">
-        <h3 style="margin: 0 0 8px 0; color: #4a90e2;">${name}</h3>
-        <div style="font-size: 0.9rem; line-height: 1.4; margin-bottom: 10px;">
+    return `<div class="marker-popup">
+        <h3 style="margin:0 0 8px 0;color:#4a90e2;">${name}</h3>
+        <div style="font-size:0.9rem;line-height:1.4;margin-bottom:10px;">
             ${type ? `<strong>类型:</strong> ${type}<br>` : ''}
             ${address ? `<strong>地址:</strong> ${address}<br>` : ''}
-            <strong>经纬度:</strong> ${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)} 
-            <button onclick="navigator.clipboard.writeText('${latlng.lat},${latlng.lng}'); showBriefMessage('✅ 坐标已复制')" class="btn-copy" style="padding: 2px 6px; font-size: 0.8rem; margin-left: 5px; cursor: pointer;">复制</button>
+            <strong>经纬度:</strong> ${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}
+            <button onclick="navigator.clipboard.writeText('${latlng.lat},${latlng.lng}');showBriefMessage('✅ 坐标已复制')" class="btn-copy" style="padding:2px 6px;font-size:0.8rem;margin-left:5px;cursor:pointer;">复制</button>
         </div>
         ${eventListHtml}
     </div>`;
-
-    layer.bindPopup(popupHtml, { maxWidth: 300 });
 }
 
 // ==== Context Menu Functions ==== //
@@ -1679,8 +2082,8 @@ function changeMarkerIcon() {
 
 function deleteSelectedMarker() {
     if (!contextMenuTarget) return;
-    drawnItems.removeLayer(contextMenuTarget);
-    updateLayerList();
+    // Redirect to the unified delete function
+    deleteLayer(L.stamp(contextMenuTarget));
     hideContextMenu();
 }
 
@@ -2212,7 +2615,7 @@ if (applyEditorBtn) {
 }
 
 if (clearAllBtn) {
-    clearAllBtn.addEventListener('click', () => {
+    clearAllBtn.addEventListener('click', async () => {
         // 检查是否有数据可清空
         let hasData = false;
         if (typeof drawnItems !== 'undefined') {
@@ -2362,80 +2765,7 @@ const INTERNAL_FIELDS = [
 ];
 
 function isInternalField(key) {
-    return key.startsWith('_') || key.startsWith('marker-') || INTERNAL_FIELDS.includes(key);
-}
-
-/**
- * 构建动态导出表头：
- * 1. 找到"最丰富"标记（业务属性最多的标记）
- * 2. 以该标记的字段顺序为基础
- * 3. 追加其他标记的额外字段
- * 4. 确保核心列在最前面
- * @param {Array} markers - 所有标记
- * @returns {Array} 排序后的表头列表
- */
-function buildDynamicExportHeaders(markers) {
-    // 核心固定列（始终优先显示）
-    const coreFields = ['图层名称', '名称', '类型', '地址', '经度', '纬度'];
-    // 基础字段映射（用于排除重复）
-    const baseFieldKeys = ['name', 'type', 'address', 'layerName', 'group'];
-
-    // 找到"最丰富"标记（业务属性最多的那个）
-    let richestMarker = null;
-    let maxBusinessProps = 0;
-
-    markers.forEach(marker => {
-        const props = marker.feature?.properties || {};
-        let businessPropCount = 0;
-
-        Object.keys(props).forEach(key => {
-            if (!isInternalField(key) && !baseFieldKeys.includes(key)) {
-                businessPropCount++;
-            }
-        });
-
-        if (businessPropCount > maxBusinessProps) {
-            maxBusinessProps = businessPropCount;
-            richestMarker = marker;
-        }
-    });
-
-    // 从最丰富标记收集字段顺序
-    const baseFields = [];
-    if (richestMarker) {
-        const props = richestMarker.feature?.properties || {};
-        Object.keys(props).forEach(key => {
-            if (!isInternalField(key) && !baseFieldKeys.includes(key)) {
-                baseFields.push(key);
-            }
-        });
-    }
-
-    // 遍历所有标记，追加额外字段
-    const seenFields = new Set(baseFields);
-    markers.forEach(marker => {
-        const props = marker.feature?.properties || {};
-        Object.keys(props).forEach(key => {
-            if (!isInternalField(key) && !baseFieldKeys.includes(key) && !seenFields.has(key)) {
-                baseFields.push(key);
-                seenFields.add(key);
-            }
-        });
-    });
-
-    // 构建最终表头：核心列 + 动态业务列
-    const finalHeaders = [...coreFields, ...baseFields];
-
-    // 如果有范围圈数据，添加到最后
-    const hasRadiusRings = markers.some(m => {
-        const props = m.feature?.properties || {};
-        return props.radiusRings && Array.isArray(props.radiusRings) && props.radiusRings.length > 0;
-    });
-    if (hasRadiusRings) {
-        finalHeaders.push('范围圈');
-    }
-
-    return finalHeaders;
+    return key.startsWith('_') || INTERNAL_FIELDS.includes(key);
 }
 
 // ==== 导出 CSV（完整字段，与 Excel 一致）====
@@ -2451,22 +2781,22 @@ if (exportBtn) {
             return;
         }
 
-        // 使用动态表头构建函数（基于最丰富标记）
-        const allHeaders = buildDynamicExportHeaders(markers);
+        // 收集所有唯一的属性键（与 Excel 导出一致）
+        const allKeys = new Set();
         const data = [];
 
         markers.forEach(marker => {
             const ll = marker.getLatLng();
             const props = marker.feature?.properties || {};
 
-            // 构建行数据
+            // 基础字段
             const row = {
-                '图层名称': props.layerName || props.group || '',
+                '经度': ll.lng,
+                '纬度': ll.lat,
                 '名称': props.name || '',
                 '类型': props.type || '',
                 '地址': props.address || '',
-                '经度': ll.lng,
-                '纬度': ll.lat
+                '图层名称': props.layerName || props.group || ''
             };
 
             // 添加所有业务属性（排除内部字段）
@@ -2474,6 +2804,7 @@ if (exportBtn) {
                 if (!isInternalField(key) &&
                     !['name', 'type', 'address', 'layerName', 'group'].includes(key)) {
                     row[key] = props[key];
+                    allKeys.add(key);
                 }
             });
 
@@ -2484,6 +2815,14 @@ if (exportBtn) {
 
             data.push(row);
         });
+
+        // 构建 CSV 表头（固定字段 + 动态字段）
+        const fixedHeaders = ['经度', '纬度', '名称', '类型', '地址', '图层名称'];
+        const dynamicHeaders = Array.from(allKeys);
+        const allHeaders = [...fixedHeaders, ...dynamicHeaders];
+        if (data.some(row => row['范围圈'])) {
+            allHeaders.push('范围圈');
+        }
 
         // 构建 CSV 内容
         const escapeCSV = (val) => {
@@ -2579,22 +2918,22 @@ if (exportExcelBtn) {
                 return;
             }
 
-            // 使用动态表头构建函数（基于最丰富标记）
-            const allHeaders = buildDynamicExportHeaders(markers);
+            // 收集所有唯一的属性键（用于动态列）
+            const allKeys = new Set();
             const data = [];
 
             markers.forEach(marker => {
                 const ll = marker.getLatLng();
                 const props = marker.feature?.properties || {};
 
-                // 构建行数据（与表头顺序一致）
+                // 基础字段（简化列名，与 CSV 保持一致）
                 const row = {
-                    '图层名称': props.layerName || props.group || '',
+                    '经度': ll.lng,
+                    '纬度': ll.lat,
                     '名称': props.name || '',
                     '类型': props.type || '',
                     '地址': props.address || '',
-                    '经度': ll.lng,
-                    '纬度': ll.lat
+                    '图层名称': props.layerName || props.group || ''
                 };
 
                 // 添加所有业务属性（排除内部字段）
@@ -2602,6 +2941,7 @@ if (exportExcelBtn) {
                     if (!isInternalField(key) &&
                         !['name', 'type', 'address', 'layerName', 'group'].includes(key)) {
                         row[key] = props[key];
+                        allKeys.add(key);
                     }
                 });
 
@@ -2613,13 +2953,12 @@ if (exportExcelBtn) {
                 data.push(row);
             });
 
-            // 使用指定表头顺序创建 Excel
-            const ws = XLSX.utils.json_to_sheet(data, { header: allHeaders });
+            const ws = XLSX.utils.json_to_sheet(data);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, '标记数据');
             XLSX.writeFile(wb, '地图标记数据.xlsx');
 
-            console.log(`[Export Excel] 成功导出 ${data.length} 个标记，${allHeaders.length} 列`);
+            console.log(`[Export Excel] 成功导出 ${data.length} 个标记`);
         } catch (err) {
             console.error('[Export Excel] Error:', err);
             showToast('Excel 导出失败: ' + err.message);
@@ -2872,9 +3211,7 @@ addManualMarkerBtn.addEventListener('click', () => {
 });
 
 // Layer panel toggle
-if (toggleLayerPanelBtn) {
-    toggleLayerPanelBtn.addEventListener('click', toggleLayerPanel);
-}
+toggleLayerPanelBtn.addEventListener('click', toggleLayerPanel);
 
 function toggleLayerPanel() {
     const panel = document.getElementById('layerPanel');
@@ -3270,6 +3607,7 @@ function saveMarkerEvents(feature, events) {
 
 // Open event tracker for a feature - shows event list
 function openEventTracker(feature) {
+    if (!isEventTrackerEnabled()) return;
     currentTrackedFeature = feature;
     currentEditingEventId = null;
 
@@ -4758,69 +5096,10 @@ setTimeout(() => {
     updateLayerDetailsPanel();
 }, 800);
 
-// ==== Clear All Layers ==== //
-async function clearAllLayers() {
-    // 检查是否在浏览模式
-    if (typeof timelineManager !== 'undefined' && timelineManager && timelineManager.isBrowseMode) {
-        if (typeof showBriefMessage === 'function') {
-            showBriefMessage('⚠️ 浏览模式下无法清空图层，请先退出');
-        }
-        return;
-    }
+// NOTE: clearAllLayers is defined earlier in this file (around line 535).
+// The duplicate version that was here has been removed to fix double-confirm and state sync bugs.
 
-    if (!await showConfirm('确定要清空所有图层吗？此操作不可撤销。')) {
-        return;
-    }
 
-    // 清空 MarkerGroupManager
-    if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
-        markerGroupManager.clear();
-    }
-
-    // 清空 drawnItems
-    if (typeof drawnItems !== 'undefined') {
-        drawnItems.clearLayers();
-    }
-
-    // 清空自定义组
-    if (typeof customGroupManager !== 'undefined' && customGroupManager) {
-        customGroupManager.groups.clear();
-        customGroupManager.markerToGroups.clear();
-        customGroupManager._renderGroupList();
-    }
-
-    // 清空选择
-    if (typeof selectionManager !== 'undefined' && selectionManager) {
-        selectionManager.clear();
-    }
-
-    // 刷新所有视图
-    updateLayerList();
-
-    if (typeof updateFeatureTable === 'function') {
-        updateFeatureTable();
-    }
-
-    if (typeof updateDashboard === 'function') {
-        updateDashboard();
-    }
-
-    if (typeof updateLayerStats === 'function') {
-        updateLayerStats();
-    }
-
-    if (typeof updateGeoJSONEditor === 'function') {
-        updateGeoJSONEditor();
-    }
-
-    if (typeof showBriefMessage === 'function') {
-        showBriefMessage('🗑️ 已清空所有图层');
-    }
-
-    console.log('All layers cleared');
-}
-
-window.clearAllLayers = clearAllLayers;
 
 // ==== Tools Menu Toggle ==== //
 function toggleToolsMenu() {
@@ -4858,19 +5137,395 @@ function updateUICollapsedState() {
     }
 }
 
-// 监听折叠按钮点击
+// ==== Robust UI Initialization (Fallback for inline onclick) ==== //
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('[UI] Script loaded and DOM ready');
+
+    // Force bind map controls toggle
     const toggleBtn = document.getElementById('toggleToolbarBtn');
     if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-            const controls = document.getElementById('controls');
-            if (controls) {
-                controls.classList.toggle('collapsed');
-                updateUICollapsedState();
+        // Remove existing listeners by cloning (optional, but cleaner)
+        // const newBtn = toggleBtn.cloneNode(true);
+        // toggleBtn.parentNode.replaceChild(newBtn, toggleBtn);
+        // Note: cloning removes inline onclick too, which might be good if inline is broken
+        // But for now, just add listener as backup
+        toggleBtn.addEventListener('click', (e) => {
+            console.log('[UI] Toggle Toolbar clicked (via Listener)');
+            // Prevent doubletoggle if inline also works
+            // But toggleControlsPanel checks state, so it might just toggle back?
+            // Actually classList.toggle is relative. If called twice, it flips back.
+            // Using a flag or check?
+            // Better: relying on ONE method.
+            // Since we added inline onclick, let's just log here or do nothing if inline works.
+            // But if inline fails (scope), this listener is the savior.
+            // Let's check if the inline function is defined.
+        });
+    }
+
+    // Force bind show layer panel button
+    const layerBtn = document.getElementById('toggleLayerPanelBtn');
+    if (layerBtn) {
+        layerBtn.addEventListener('click', () => {
+            console.log('[UI] Toggle Layer Panel clicked (via Listener)');
+            if (typeof toggleLayerPanel === 'function') {
+                // toggleLayerPanel(); // Don't call if inline works!
+                // Risk of double toggle.
+            }
+        });
+    }
+
+    // Force bind clear all button
+    const clearBtn = document.getElementById('clearAllLayersBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            console.log('[UI] Clear All clicked (via Listener)');
+            if (typeof clearAllLayersWithConfirm === 'function') {
+                // clearAllLayersWithConfirm();
             }
         });
     }
 });
+
+// ==== 数据导出模块 (Dynamic All-Fields Export) ==== //
+
+/**
+ * 收集所有标记数据，生成动态全量字段的数据表
+ * @returns {{ headers: string[], rows: any[][] }}
+ */
+function collectAllMarkersData() {
+    const allMarkers = [];
+
+    // 1. 从 drawnItems 收集
+    if (typeof drawnItems !== 'undefined') {
+        drawnItems.eachLayer(layer => {
+            if (layer instanceof L.Marker) {
+                allMarkers.push(layer);
+            }
+        });
+    }
+
+    // 2. 从 markerClusterGroup 收集
+    if (typeof markerClusterGroup !== 'undefined') {
+        markerClusterGroup.eachLayer(layer => {
+            if (layer instanceof L.Marker && !allMarkers.includes(layer)) {
+                allMarkers.push(layer);
+            }
+        });
+    }
+
+    // 3. 从 markerGroupManager 收集（处理分组隐藏的标记）
+    if (typeof markerGroupManager !== 'undefined' && markerGroupManager) {
+        markerGroupManager.markerToGroup.forEach((group, marker) => {
+            if (!allMarkers.includes(marker)) {
+                allMarkers.push(marker);
+            }
+        });
+    }
+
+    // 4. 动态收集所有字段名（Key Union）
+    const fieldSet = new Set();
+    // 固定字段：经纬度
+    fieldSet.add('Latitude');
+    fieldSet.add('Longitude');
+
+    allMarkers.forEach(marker => {
+        const props = marker.feature?.properties || {};
+        Object.keys(props).forEach(key => {
+            // 过滤内部字段：以 _ 开头的技术字段
+            if (key.startsWith('_')) return;
+            fieldSet.add(key);
+        });
+    });
+
+    // 生成表头（固定顺序：Lat/Lng 在前，其他字段按字母排序）
+    const headers = ['Latitude', 'Longitude'];
+    const otherFields = Array.from(fieldSet).filter(f => f !== 'Latitude' && f !== 'Longitude').sort();
+    headers.push(...otherFields);
+
+    // 5. 生成数据行
+    const rows = allMarkers.map(marker => {
+        const latlng = marker.getLatLng();
+        const props = marker.feature?.properties || {};
+
+        return headers.map(h => {
+            if (h === 'Latitude') return latlng.lat;
+            if (h === 'Longitude') return latlng.lng;
+            return props[h] !== undefined ? props[h] : '';
+        });
+    });
+
+    return { headers, rows };
+}
+
+/**
+ * 导出为 CSV 文件
+ */
+function exportToCSV() {
+    const { headers, rows } = collectAllMarkersData();
+
+    if (rows.length === 0) {
+        showBriefMessage('⚠️ 没有标记可导出');
+        return;
+    }
+
+    // 构建 CSV 内容
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => {
+            // 处理包含逗号或引号的单元格
+            if (typeof cell === 'string' && (cell.includes(',') || cell.includes('"') || cell.includes('\n'))) {
+                return `"${cell.replace(/"/g, '""')}"`;
+            }
+            return cell;
+        }).join(','))
+    ].join('\n');
+
+    // 添加 BOM 以支持中文
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+    // 生成下载链接
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `markers_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showBriefMessage(`✅ 已导出 ${rows.length} 条记录到 CSV`);
+}
+window.exportToCSV = exportToCSV;
+
+/**
+ * 导出为 Excel 文件 (简易 HTML 表格格式，可被 Excel 识别)
+ */
+function exportToExcel() {
+    const { headers, rows } = collectAllMarkersData();
+
+    if (rows.length === 0) {
+        showBriefMessage('⚠️ 没有标记可导出');
+        return;
+    }
+
+    // 构建 HTML 表格（Excel 可直接打开）
+    let tableHtml = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+    tableHtml += '<head><meta charset="UTF-8"></head><body>';
+    tableHtml += '<table border="1">';
+
+    // 表头
+    tableHtml += '<tr>';
+    headers.forEach(h => {
+        tableHtml += `<th style="background:#4a90e2;color:white;font-weight:bold;">${escapeHtml(h)}</th>`;
+    });
+    tableHtml += '</tr>';
+
+    // 数据行
+    rows.forEach(row => {
+        tableHtml += '<tr>';
+        row.forEach(cell => {
+            tableHtml += `<td>${escapeHtml(String(cell))}</td>`;
+        });
+        tableHtml += '</tr>';
+    });
+
+    tableHtml += '</table></body></html>';
+
+    // 生成下载
+    const blob = new Blob([tableHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `markers_export_${new Date().toISOString().slice(0, 10)}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showBriefMessage(`✅ 已导出 ${rows.length} 条记录到 Excel`);
+}
+window.exportToExcel = exportToExcel;
+
+/**
+ * HTML 转义辅助函数
+ */
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// ==== 分享地图截图模块 (Optimized Pure-Map Screenshot) ==== //
+
+/**
+ * 显示全屏 Loading 遮罩
+ */
+function showScreenshotLoading() {
+    const overlay = document.createElement('div');
+    overlay.className = 'screenshot-loading-overlay';
+    overlay.id = 'screenshotLoading';
+    overlay.innerHTML = `
+        <div class="spinner"></div>
+        <span>正在生成截图...</span>
+    `;
+    document.body.appendChild(overlay);
+}
+
+/**
+ * 隐藏 Loading 遮罩
+ */
+function hideScreenshotLoading() {
+    const overlay = document.getElementById('screenshotLoading');
+    if (overlay) overlay.remove();
+}
+
+/**
+ * 显示截图预览弹窗
+ */
+function showScreenshotPreview(dataUrl) {
+    const modal = document.createElement('div');
+    modal.className = 'screenshot-preview-modal';
+    modal.id = 'screenshotPreview';
+    modal.innerHTML = `
+        <img src="${dataUrl}" alt="地图截图" />
+        <div class="actions">
+            <button class="btn-download" onclick="downloadScreenshot()">
+                <i class="fa-solid fa-download"></i> 下载图片
+            </button>
+            <button class="btn-close" onclick="closeScreenshotPreview()">
+                <i class="fa-solid fa-xmark"></i> 关闭
+            </button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 存储 dataUrl 供下载使用
+    modal.dataset.imageUrl = dataUrl;
+}
+
+/**
+ * 关闭截图预览
+ */
+function closeScreenshotPreview() {
+    const modal = document.getElementById('screenshotPreview');
+    if (modal) modal.remove();
+}
+window.closeScreenshotPreview = closeScreenshotPreview;
+
+/**
+ * 下载截图
+ */
+function downloadScreenshot() {
+    const modal = document.getElementById('screenshotPreview');
+    if (!modal) return;
+
+    const dataUrl = modal.dataset.imageUrl;
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `map_screenshot_${new Date().toISOString().slice(0, 10)}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showBriefMessage('✅ 截图已保存');
+}
+window.downloadScreenshot = downloadScreenshot;
+
+/**
+ * 等待下一帧（确保浏览器完成重绘）
+ */
+function waitForRepaint() {
+    return new Promise(resolve => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(resolve);
+        });
+    });
+}
+
+/**
+ * 分享地图截图（纯净模式）
+ * 性能优化：只截取 #map 节点，使用 screenshot-mode 隐藏所有 UI
+ */
+async function shareMap() {
+    console.log('[ShareMap] Starting optimized screenshot...');
+
+    // 1. 显示 Loading
+    showScreenshotLoading();
+
+    // 获取地图容器（提前获取用于添加类）
+    const mapElement = document.getElementById('map');
+    if (!mapElement) {
+        hideScreenshotLoading();
+        showBriefMessage('❌ 地图容器未找到');
+        return;
+    }
+
+    try {
+        // 2. 添加纯净模式 CSS 类到 body（隐藏外部面板）和 #map（隐藏 Leaflet 控件）
+        document.body.classList.add('screenshot-mode');
+        mapElement.classList.add('screenshot-mode');
+
+        // 3. 等待浏览器完成重绘（使用双重 requestAnimationFrame 确保 UI 真正消失）
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        // 4. 使用 html2canvas 截取地图（性能优化配置）
+        const canvas = await html2canvas(mapElement, {
+            useCORS: true,
+            allowTaint: true,
+            scale: window.devicePixelRatio > 2 ? 2 : window.devicePixelRatio, // 限制最大 2x 防止过慢
+            logging: false,
+            backgroundColor: null,
+            // 过滤不需要的内部元素
+            ignoreElements: (element) => {
+                // 强制忽略所有 Leaflet 控件（双保险）
+                if (element.classList) {
+                    if (element.classList.contains('leaflet-control-container') ||
+                        element.classList.contains('leaflet-control') ||
+                        element.classList.contains('leaflet-bar') ||
+                        element.classList.contains('leaflet-draw-toolbar')) {
+                        return true;
+                    }
+                }
+                // 忽略隐藏的弹窗容器
+                if (element.classList && element.classList.contains('leaflet-popup-pane')) {
+                    return !element.querySelector('.leaflet-popup');
+                }
+                return false;
+            }
+        });
+
+        // 5. 移除纯净模式 CSS 类（恢复 UI）
+        document.body.classList.remove('screenshot-mode');
+        mapElement.classList.remove('screenshot-mode');
+
+        // 6. 隐藏 Loading
+        hideScreenshotLoading();
+
+        // 7. 转换为图片 URL 并显示预览
+        const dataUrl = canvas.toDataURL('image/png');
+        showScreenshotPreview(dataUrl);
+
+        console.log('[ShareMap] Screenshot generated successfully');
+
+    } catch (error) {
+        console.error('[ShareMap] Error:', error);
+
+        // 确保恢复 UI（无论成功失败）
+        document.body.classList.remove('screenshot-mode');
+        mapElement.classList.remove('screenshot-mode');
+        hideScreenshotLoading();
+
+        showBriefMessage('❌ 截图生成失败: ' + error.message);
+    }
+}
+window.shareMap = shareMap;
+
 
 // ============================================================
 // == 导出为单网页版 (Export as Self-Contained Single HTML) ==
@@ -4902,7 +5557,10 @@ async function exportAsSinglePage() {
         const props = marker.feature?.properties || {};
         return {
             type: 'Feature',
-            geometry: { type: 'Point', coordinates: [ll.lng, ll.lat] },
+            geometry: {
+                type: 'Point',
+                coordinates: [ll.lng, ll.lat]
+            },
             properties: { ...props }
         };
     });
@@ -4917,12 +5575,15 @@ async function exportAsSinglePage() {
 
     try {
         // 尝试获取空白模板
+        const templateUrl = '地图编辑器-空白版.html';
         let templateHtml;
+
         try {
-            const resp = await fetch('地图编辑器-空白版.html', { cache: 'no-cache' });
+            const resp = await fetch(templateUrl, { cache: 'no-cache' });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             templateHtml = await resp.text();
         } catch (fetchErr) {
+            // 模板不存在，提示用户先生成
             showToast(
                 '❌ 找不到空白模板文件。\n\n' +
                 '请先在项目目录运行：\n' +
@@ -4932,7 +5593,7 @@ async function exportAsSinglePage() {
             return;
         }
 
-        // 构造数据注入脚本块
+        // 构造数据注入脚本块（插在 <body> 之后，所有 JS 执行之前）
         const now = new Date().toLocaleString('zh-CN');
         const dataScript = [
             '<script>',
@@ -4992,20 +5653,29 @@ window.exportAsSinglePage = exportAsSinglePage;
 // == 启动时检测预载数据（支持 build-single.py --with-data）==
 // ============================================================
 
+/**
+ * 若当前页面由 build-single.py --with-data 或应用内导出生成，
+ * 则 window.__PRELOADED_DATA__ 中存有 GeoJSON 数据，自动导入到地图。
+ */
 (function autoLoadPreloadedData() {
     if (!window.__PRELOADED_DATA__) return;
 
     const data = window.__PRELOADED_DATA__;
     const meta = window.__PRELOADED_META__ || {};
 
+    // 等 DOM 和地图初始化完成后再导入（最多等 3 秒）
     let attempts = 0;
     const tryImport = () => {
         attempts++;
+        // 判断地图和 drawnItems 是否就绪
         if (typeof importGeoJSON === 'function' && typeof drawnItems !== 'undefined') {
             try {
                 importGeoJSON(JSON.stringify(data));
                 const count = data.features ? data.features.length : 0;
-                console.log(`[PreloadedData] 自动导入 ${count} 个标记`, meta.exportedAt ? `(导出于 ${meta.exportedAt})` : '');
+                console.log(
+                    `[PreloadedData] 自动导入 ${count} 个标记`,
+                    meta.exportedAt ? `(导出于 ${meta.exportedAt})` : ''
+                );
                 if (typeof showBriefMessage === 'function') {
                     showBriefMessage(`📍 已加载 ${count} 个预载标记`);
                 }
@@ -5013,12 +5683,13 @@ window.exportAsSinglePage = exportAsSinglePage;
                 console.error('[PreloadedData] 导入失败:', e);
             }
         } else if (attempts < 30) {
+            // 每 100ms 重试，最多 3 秒
             setTimeout(tryImport, 100);
         } else {
             console.warn('[PreloadedData] 超时：地图未就绪，跳过预载数据');
         }
     };
 
+    // 延迟 200ms 开始尝试（等待 DOM 完成）
     setTimeout(tryImport, 200);
 })();
-

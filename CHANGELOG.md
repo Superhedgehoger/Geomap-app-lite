@@ -4,6 +4,15 @@
 
 ---
 
+## [v2.18.0] - 2026-08-09
+
+### 🔀 Full/Lite 源码合并
+- 核心源码与 `Geomap-app` Full 版统一，不再单独维护落后的 `script.js`
+- 新增 `variant-config.js`，Lite 部署只关闭事件追踪器功能
+- `build-single.py` 支持 `--variant full|lite`
+- 单文件构建补入 `popup-config.js`
+- 新增 Full/Lite 变体回归测试
+
 ## [v2.17.0] - 2026-03-25
 
 ### ✨ 新功能

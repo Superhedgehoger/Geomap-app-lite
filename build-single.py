@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GeoMap Lite 单文件构建脚本
-============================
+GeoMap 单文件构建脚本
+======================
 将所有 JS/CSS 合并内联到一个自包含 HTML 文件中。
 
 使用方法:
@@ -11,6 +11,9 @@ GeoMap Lite 单文件构建脚本
 
     # 生成含数据版（嵌入指定 GeoJSON，打开即显示标记）
     python build-single.py --with-data example.geojson
+
+    # 生成 Lite 版（共用同一套源码）
+    python build-single.py --variant lite
 
     # 指定自定义输出文件名
     python build-single.py --with-data my_data.geojson --output 我的地图.html
@@ -37,7 +40,7 @@ CSS_FILES = [
     'table-view-styles.css',
 ]
 
-# JS 文件按依赖顺序排列（lite 版）
+# JS 文件按依赖顺序排列
 JS_FILES = [
     'marker-group.js',
     'selection-manager.js',
@@ -46,6 +49,9 @@ JS_FILES = [
     'timeline-manager.js',
     'dashboard-panel.js',
     'ui-dialogs.js',
+    'distribution-config.js',
+    'variant-config.js',
+    'popup-config.js',
     'script.js',
     'property-editor.js',
     'table-view.js',
@@ -91,6 +97,7 @@ def make_data_injection(geojson_path):
     with open(geojson_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
+    # 写入时间戳，方便追踪
     meta = {
         'source': os.path.basename(geojson_path),
         'exportedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -110,18 +117,18 @@ def make_data_injection(geojson_path):
     )
 
 # ── 核心构建 ─────────────────────────────────────────────────────────────────
-def build_single_html(geojson_path=None, output_name=None):
+def build_single_html(geojson_path=None, output_name=None, variant='full'):
     """构建单文件 HTML"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-    print(f'\nGeoMap Lite 单文件构建 [{timestamp}]\n{"─" * 40}')
+    print(f'\nGeoMap 单文件构建 [{timestamp}]\n{"─" * 40}')
 
     # 确定输出文件名
     if output_name:
         out_filename = output_name
     elif geojson_path:
-        out_filename = '地图编辑器-数据版.html'
+        out_filename = f'地图编辑器-{variant}-数据版.html'
     else:
-        out_filename = '地图编辑器-空白版.html'
+        out_filename = f'地图编辑器-{variant}-空白版.html'
 
     # 读取 HTML 模板
     html_path = os.path.join(BASE_DIR, HTML_TEMPLATE)
@@ -156,16 +163,18 @@ def build_single_html(geojson_path=None, output_name=None):
             html
         )
 
-    # 如果有预载数据，注入到 <body> 之后
+    # 如果有预载数据，在 </head> 前（即 CSS 之前）注入
     if geojson_path:
         print(f'\n嵌入数据: {geojson_path}')
         injection = make_data_injection(geojson_path)
+        # 在 <body> 之后立刻注入，确保在所有 JS 之前执行
         html = html.replace('<body>', f'<body>\n{injection}', 1)
         feature_count = injection.count('"type":"Feature"')
         print(f'  ✓ 已嵌入数据（约 {feature_count} 个要素）')
 
-    # 在 </body> 前插入合并 JS
-    js_block = f'<script>\n{combined_js}\n</script>\n</body>'
+    # 在 </body> 前插入变体配置和合并 JS
+    variant_block = f'window.GEOMAP_VARIANT = {json.dumps(variant)};\n'
+    js_block = f'<script>\n{variant_block}{combined_js}\n</script>\n</body>'
     html = html.replace('</body>', js_block)
 
     # 写出文件
@@ -186,7 +195,7 @@ def build_single_html(geojson_path=None, output_name=None):
 # ── 入口 ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='GeoMap Lite 单文件构建工具',
+        description='GeoMap 单文件构建工具',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -194,6 +203,12 @@ if __name__ == '__main__':
   python build-single.py --with-data data.geojson    # 生成含数据版
   python build-single.py --with-data data.geojson --output 青岛地图.html
         """
+    )
+    parser.add_argument(
+        '--variant',
+        choices=('full', 'lite'),
+        default='full',
+        help='构建 Full 或 Lite 功能集（默认: full）'
     )
     parser.add_argument(
         '--with-data', '-d',
@@ -214,4 +229,4 @@ if __name__ == '__main__':
             print(f'✗ GeoJSON 文件不存在: {geojson}')
             sys.exit(1)
 
-    build_single_html(geojson_path=geojson, output_name=args.output)
+    build_single_html(geojson_path=geojson, output_name=args.output, variant=args.variant)
