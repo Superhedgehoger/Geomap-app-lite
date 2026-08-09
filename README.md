@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-v2.14.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v2.18.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/github-Geomap--app--lite-181717.svg?logo=github)](https://github.com/Superhedgehoger/Geomap-app-lite)
 
@@ -18,6 +18,8 @@
 > ⚠️ **Privacy Notice**: This project does not contain any real or test business data, only code structure and functionality.
 
 **Lite version** of the GeoJSON Map Editor - A lightweight map editing tool focused on core functionality, without the Event Tracker module.
+
+Since v2.18.0, Full and Lite use the same core source. This repository is the Lite deployment entry; its feature configuration disables Event Tracker instead of maintaining a separate application fork.
 
 ### 🔄 Comparison with Full Version
 
@@ -72,6 +74,8 @@ MIT License - See [LICENSE](LICENSE) file
 > ⚠️ **隐私声明**：本项目不包含任何真实或测试业务数据，仅提供代码结构与功能实现。
 
 GeoJSON 地图编辑器的 **轻量级版本** - 专注核心地图编辑功能，不含事件追踪器模块。
+
+自 v2.18.0 起，Full 和 Lite 共用同一套核心源码。本仓库作为 Lite 独立部署入口，通过功能配置关闭事件追踪器，不再维护独立应用分支。
 
 ### 🔄 与完整版对比
 
